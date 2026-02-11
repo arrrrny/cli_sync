@@ -27,7 +27,7 @@ author: your_name_or_organization
 ### Key Points for Each Field:
 
 #### Name
-- Use lowercase with  hyphens for multi-word names
+- Use lowercase with hyphens for multi-word names
 - Make it descriptive and unique
 - Examples: `file-backup`, `git-commit-helper`, `docker-manager`
 
