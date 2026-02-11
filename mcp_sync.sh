@@ -213,6 +213,10 @@ status() {
 
   echo -e "${BLUE}OpenCode:${NC} $(jq '(.mcp // {}) | length' "$OPENCODE_CONFIG" 2>/dev/null || echo 0) servers"
   jq -r '(.mcp // {}) | keys[] | "  - \(.)"' "$OPENCODE_CONFIG" 2>/dev/null || true
+  echo ""
+
+  echo -e "${BLUE}Codebuddy:${NC} $(jq '(.mcpServers // {}) | length' "$CODEBUDDY_CONFIG" 2>/dev/null || echo 0) servers"
+  jq -r '(.mcpServers // {}) | keys[] | "  - \(.)"' "$CODEBUDDY_CONFIG" 2>/dev/null || true
 }
 
 clear_backups() {
