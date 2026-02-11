@@ -20,6 +20,7 @@ FACTORY_CONFIG="/Users/arrrrny/.factory/mcp.json"
 OPENCODE_CONFIG="/Users/arrrrny/.config/opencode/opencode.json"
 VIBE_CONFIG="/Users/arrrrny/.vibe/config.toml"
 QWEN_CONFIG="${HOME}/.qwen/settings.json"
+CODEBUDDY_CONFIG="${HOME}/.codebuddy/.mcp.json"
 
 KIRO_BIN="/Applications/Kiro CLI.app/Contents/MacOS/kiro-cli"
 
@@ -31,134 +32,54 @@ backup() {
   [[ -f "$file" ]] && cp "$file" "${BACKUP_DIR}/${name}_${TIMESTAMP}.json"
 }
 
-render_config() {
-  python3 - "$MASTER_CONFIG" "$SCRIPT_DIR/.env" << 'PYTHON'
-import sys, json, re, os
-
-master_path = sys.argv[1]
-env_path = sys.argv[2] if len(sys.argv) > 2 else None
-
-replacements = {
-    "Z_AI_API_KEY": "",
-    "TRELLO_TOKEN": "",
-    "TRELLO_API_KEY": "",
-    "GITHUB_PERSONAL_ACCESS_TOKEN": "",
-    "QDRANT_URL": "http://localhost:6333",
-    "QDRANT_API_KEY": "",
-    "CONTEXT7_API_KEY":""
-}
-
-zshrc_path = os.path.expanduser("~/.zshrc")
-for line in open(zshrc_path):
-    line = line.strip()
-    if not line.startswith("export "):
-        continue
-    match = re.match(r'export (\w+)=(.+)', line)
-    if match:
-        key, value = match.groups()
-        value = value.strip('"\'')
-        if key in replacements and value and not value.startswith("${"):
-            replacements[key] = value
-
-if env_path and os.path.exists(env_path):
-    for line in open(env_path):
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        match = re.match(r'(\w+)=(.+)', line)
-        if match:
-            key, value = match.groups()
-            if key in replacements:
-                replacements[key] = value.strip()
-
-content = open(master_path).read()
-for key, value in replacements.items():
-    content = content.replace("${" + key + "}", value)
-
-data = json.loads(content)
-print(json.dumps(data, indent=2))
-PYTHON
+strip_json_comments() {
+  sed -e 's|//.*$||g' -e 's|/\*.*\*/||g' "$1"
 }
 
 sync_zed() {
   log_info "Syncing Zed..."
   backup "$ZED_CONFIG" "zed"
-  render_config > "${MASTER_CONFIG}.rendered"
-  python3 - "$ZED_CONFIG" "${MASTER_CONFIG}.rendered" << 'PYTHON'
-import sys, json
-zed_path, master_path = sys.argv[1], sys.argv[2]
-with open(zed_path) as f: zed = json.load(f)
-with open(master_path) as f: mcp = json.load(f)
-zed['context_servers'] = mcp
-json.dump(zed, open(zed_path, 'w'), indent=2)
-PYTHON
-  rm -f "${MASTER_CONFIG}.rendered"
+  
+  local zed_content
+  zed_content=$(strip_json_comments "$ZED_CONFIG")
+  
+  jq -s '.[0] * {context_servers: .[1]}' <(echo "$zed_content") "$MASTER_CONFIG" 2>/dev/null > "$ZED_CONFIG.tmp" && mv "$ZED_CONFIG.tmp" "$ZED_CONFIG"
+  
   log_success "Zed synced"
 }
 
 sync_amp() {
   log_info "Syncing Amp..."
   backup "$AMP_CONFIG" "amp"
-  render_config > "${MASTER_CONFIG}.rendered"
-  python3 - "$AMP_CONFIG" "${MASTER_CONFIG}.rendered" << 'PYTHON'
-import sys, json
-amp_path, master_path = sys.argv[1], sys.argv[2]
-with open(amp_path) as f: amp = json.load(f)
-with open(master_path) as f: mcp = json.load(f)
-
-amp['amp.mcpServers'] = {}
-for name, config in mcp.items():
-    cmd = config.get("command", "")
-    args = config.get("args", [])
-    env = config.get("env", {})
-    amp['amp.mcpServers'][name] = {
-        "command": cmd,
-        "args": args if args else [],
-        "env": env,
-        "enabled": True
-    }
-
-json.dump(amp, open(amp_path, 'w'), indent=2)
-PYTHON
-  rm -f "${MASTER_CONFIG}.rendered"
+  
+  jq -s '.[0] * {".mcpServers": .[1] | to_entries | map({key: .key, value: (.value + {enabled: true})}) | from_entries}' "$AMP_CONFIG" "$MASTER_CONFIG" > "$AMP_CONFIG.tmp" && mv "$AMP_CONFIG.tmp" "$AMP_CONFIG"
+  
   log_success "Amp synced"
 }
 
 sync_claude() {
   log_info "Syncing Claude..."
   backup "$CLAUDE_CONFIG" "claude"
-  render_config > "${MASTER_CONFIG}.rendered"
-  python3 - "$CLAUDE_CONFIG" "${MASTER_CONFIG}.rendered" << 'PYTHON'
-import sys, json
-claude_path, master_path = sys.argv[1], sys.argv[2]
-with open(claude_path) as f: claude = json.load(f)
-with open(master_path) as f: mcp = json.load(f)
-claude['mcpServers'] = mcp
-json.dump(claude, open(claude_path, 'w'), indent=2)
-PYTHON
-  rm -f "${MASTER_CONFIG}.rendered"
+  
+  jq -s '.[0] * {mcpServers: .[1]}' "$CLAUDE_CONFIG" "$MASTER_CONFIG" > "$CLAUDE_CONFIG.tmp" && mv "$CLAUDE_CONFIG.tmp" "$CLAUDE_CONFIG"
+  
   log_success "Claude synced"
 }
 
 sync_kiro() {
   log_info "Syncing Kiro CLI..."
   if [[ -x "$KIRO_BIN" ]]; then
-    render_config > "${MASTER_CONFIG}.rendered"
-    current=$("$KIRO_BIN" mcp list 2>/dev/null | grep -E '^[a-zA-Z]' | awk '{print $1}' || true)
     while IFS= read -r name; do
       [[ -z "$name" ]] && continue
-      cmd=$(jq -r ".[\"$name\"].command // empty" "${MASTER_CONFIG}.rendered" 2>/dev/null)
-      args=$(jq -r ".[\"$name\"].args // [] | join(\" \")" "${MASTER_CONFIG}.rendered" 2>/dev/null || echo "")
+      cmd=$(jq -r ".[\"$name\"].command // empty" "$MASTER_CONFIG" 2>/dev/null)
+      args=$(jq -r ".[\"$name\"].args | join(\" \") // \"\"" "$MASTER_CONFIG" 2>/dev/null || echo "")
       if [[ -n "$cmd" && "$cmd" != "null" ]]; then
-        if echo "$current" | grep -q "^${name}$"; then
-          log_info "Kiro already has $name"
-        else
+        if ! "$KIRO_BIN" mcp list 2>/dev/null | grep -q "^${name}$"; then
           log_info "Adding $name to Kiro..."
-          "$KIRO_BIN" mcp add "$name" "$cmd" $args 2>/dev/null || true
+          timeout 5 "$KIRO_BIN" mcp add "$name" "$cmd" $args 2>/dev/null || true
         fi
       fi
-    done < <(jq -r 'keys[]' "${MASTER_CONFIG}.rendered" 2>/dev/null || echo "")
-    rm -f "${MASTER_CONFIG}.rendered"
+    done < <(jq -r 'keys[]' "$MASTER_CONFIG" 2>/dev/null || echo "")
     log_success "Kiro synced"
   else
     log_info "Kiro CLI not found"
@@ -168,21 +89,9 @@ sync_kiro() {
 sync_kilo() {
   log_info "Syncing Kilo-code..."
   backup "$KILO_CONFIG" "kilo"
-  render_config > "${MASTER_CONFIG}.rendered"
-  python3 - "$KILO_CONFIG" "${MASTER_CONFIG}.rendered" << 'PYTHON'
-import sys, json
-kilo_path, master_path = sys.argv[1], sys.argv[2]
-with open(master_path) as f: mcp = json.load(f)
-output = {"mcpServers": {}}
-for k, v in mcp.items():
-    output["mcpServers"][k] = {
-        "command": v.get("command"),
-        "args": v.get("args", []),
-        "env": v.get("env", {})
-    }
-json.dump(output, open(kilo_path, 'w'), indent=2)
-PYTHON
-  rm -f "${MASTER_CONFIG}.rendered"
+  
+  jq -s '.[0] as $kilo | .[1] as $mcp | if $kilo.mcpServers == null then $kilo * {mcpServers: $mcp} else $kilo * {mcpServers: $mcp} end' "$KILO_CONFIG" "$MASTER_CONFIG" > "$KILO_CONFIG.tmp" && mv "$KILO_CONFIG.tmp" "$KILO_CONFIG"
+  
   log_success "Kilo synced"
 }
 
@@ -190,14 +99,7 @@ sync_factory() {
   log_info "Syncing Factory-droid..."
   if [[ -f "$FACTORY_CONFIG" ]]; then
     backup "$FACTORY_CONFIG" "factory"
-    render_config > "${MASTER_CONFIG}.rendered"
-    python3 - "$FACTORY_CONFIG" "${MASTER_CONFIG}.rendered" << 'PYTHON'
-import sys, json
-factory_path, master_path = sys.argv[1], sys.argv[2]
-with open(master_path) as f: mcp = json.load(f)
-json.dump(mcp, open(factory_path, 'w'), indent=2)
-PYTHON
-    rm -f "${MASTER_CONFIG}.rendered"
+    cp "$MASTER_CONFIG" "$FACTORY_CONFIG"
     log_success "Factory-droid synced"
   else
     log_info "Factory-droid config not found"
@@ -208,28 +110,9 @@ sync_trae() {
   log_info "Syncing Trae..."
   if [[ -f "$TRAE_CONFIG" ]]; then
     backup "$TRAE_CONFIG" "trae"
-    render_config > "${MASTER_CONFIG}.rendered"
-    python3 - "$TRAE_CONFIG" "${MASTER_CONFIG}.rendered" << 'PYTHON'
-import sys, json
-trae_path, master_path = sys.argv[1], sys.argv[2]
-with open(trae_path) as f: trae = json.load(f)
-with open(master_path) as f: mcp = json.load(f)
-
-trae['mcpServers'] = {}
-for name, config in mcp.items():
-    cmd = config.get("command", "")
-    args = config.get("args", [])
-    env = config.get("env", {})
-    trae['mcpServers'][name] = {
-        "command": cmd,
-        "args": args if args else [],
-        "env": env,
-        "enabled": True
-    }
-
-json.dump(trae, open(trae_path, 'w'), indent=2)
-PYTHON
-    rm -f "${MASTER_CONFIG}.rendered"
+    
+    jq -s '.[0] * {mcpServers: .[1] | to_entries | map({key: .key, value: (.value + {enabled: true})}) | from_entries}' "$TRAE_CONFIG" "$MASTER_CONFIG" > "$TRAE_CONFIG.tmp" && mv "$TRAE_CONFIG.tmp" "$TRAE_CONFIG"
+    
     log_success "Trae synced"
   else
     log_info "Trae config not found"
@@ -240,27 +123,9 @@ sync_qwen() {
   log_info "Syncing Qwen..."
   if [[ -f "$QWEN_CONFIG" ]]; then
     backup "$QWEN_CONFIG" "qwen"
-    render_config > "${MASTER_CONFIG}.rendered"
-    python3 - "$QWEN_CONFIG" "${MASTER_CONFIG}.rendered" << 'PYTHON'
-import sys, json
-qwen_path, master_path = sys.argv[1], sys.argv[2]
-with open(qwen_path) as f: qwen = json.load(f)
-with open(master_path) as f: mcp = json.load(f)
-
-qwen['mcpServers'] = {}
-for name, config in mcp.items():
-    cmd = config.get("command", "")
-    args = config.get("args", [])
-    env = config.get("env", {})
-    qwen['mcpServers'][name] = {
-        "command": cmd,
-        "args": args if args else [],
-        "env": env
-    }
-
-json.dump(qwen, open(qwen_path, 'w'), indent=2)
-PYTHON
-    rm -f "${MASTER_CONFIG}.rendered"
+    
+    jq -s '.[0] * {mcpServers: .[1]}' "$QWEN_CONFIG" "$MASTER_CONFIG" > "$QWEN_CONFIG.tmp" && mv "$QWEN_CONFIG.tmp" "$QWEN_CONFIG"
+    
     log_success "Qwen synced"
   else
     log_info "Qwen config not found"
@@ -271,37 +136,35 @@ sync_opencode() {
   log_info "Syncing OpenCode..."
   if [[ -f "$OPENCODE_CONFIG" ]]; then
     backup "$OPENCODE_CONFIG" "opencode"
-    render_config > "${MASTER_CONFIG}.rendered"
-    python3 - "$OPENCODE_CONFIG" "${MASTER_CONFIG}.rendered" << 'PYTHON'
-import sys, json, re
-
-opencode_path = sys.argv[1]
-master_path = sys.argv[2]
-
-with open(opencode_path) as f:
-    content = f.read()
-
-content = re.sub(r',\s*([}\]])', r'\1', content)
-opencode = json.loads(content)
-
-with open(master_path) as f: mcp = json.load(f)
-
-opencode['mcp'] = {}
-for name, config in mcp.items():
-    cmd = config.get("command", "")
-    args = config.get("args", [])
-    opencode['mcp'][name] = {
-        "command": [cmd] + args if args else [cmd],
-        "enabled": True,
-        "type": "local"
-    }
-
-json.dump(opencode, open(opencode_path, 'w'), indent=2, separators=(',', ': '))
-PYTHON
-    rm -f "${MASTER_CONFIG}.rendered"
+    
+    local opencode_mcp
+    opencode_mcp=$(jq -r '
+      to_entries | map({
+        key: .key,
+        value: (.value + {enabled: true, type: "local"} | 
+        .command = (if .command | type == "string" then ([.command] + (.args // [])) else .command end) |
+        del(.args))
+      }) | from_entries
+    ' "$MASTER_CONFIG")
+    
+    jq --argjson mcp "$opencode_mcp" '. * {$mcp}' "$OPENCODE_CONFIG" > "$OPENCODE_CONFIG.tmp" && mv "$OPENCODE_CONFIG.tmp" "$OPENCODE_CONFIG"
+    
     log_success "OpenCode synced"
   else
     log_info "OpenCode config not found"
+  fi
+}
+
+sync_codebuddy() {
+  log_info "Syncing Codebuddy..."
+  if [[ -f "$CODEBUDDY_CONFIG" ]]; then
+    backup "$CODEBUDDY_CONFIG" "codebuddy"
+    
+    jq -s '.[0] * {mcpServers: .[1]}' "$CODEBUDDY_CONFIG" "$MASTER_CONFIG" > "$CODEBUDDY_CONFIG.tmp" && mv "$CODEBUDDY_CONFIG.tmp" "$CODEBUDDY_CONFIG"
+    
+    log_success "Codebuddy synced"
+  else
+    log_info "Codebuddy config not found"
   fi
 }
 
@@ -309,37 +172,16 @@ sync_vibe() {
   log_info "Syncing Mistral Vibe..."
   if [[ -f "$VIBE_CONFIG" ]]; then
     backup "$VIBE_CONFIG" "vibe"
-    render_config > "${MASTER_CONFIG}.rendered"
-    python3 - "$VIBE_CONFIG" "${MASTER_CONFIG}.rendered" << 'PYTHON'
-import sys, json
-
-config_path = sys.argv[1]
-master_path = sys.argv[2]
-
-with open(master_path) as f: mcp = json.load(f)
-
-servers_toml = []
-for name, config in mcp.items():
-    server_toml = f'[[mcp_servers]]\nname = "{name}"\ntransport = "stdio"\n'
-    server_toml += f'command = "{config.get("command", "")}"\n'
-    args = config.get("args", [])
-    if args:
-        server_toml += 'args = [' + ', '.join(f'"{a}"' for a in args) + ']\n'
-    env = config.get("env", {})
-    if env:
-        server_toml += 'env = { ' + ', '.join(f'{k} = "{v}"' for k, v in env.items()) + ' }\n'
-    servers_toml.append(server_toml)
-
-with open(config_path) as f:
-    content = f.read()
-
-header = content.split("[[mcp_servers]]")[0].strip()
-new_content = header + "\n" + "\n".join(servers_toml) + "\n"
-
-with open(config_path, 'w') as f:
-    f.write(new_content)
-PYTHON
-    rm -f "${MASTER_CONFIG}.rendered"
+    
+    local header
+    header=$(sed -n '/^\[\[mcp_servers\]\]/p;1,/^[[mcp_servers]]/p' "$VIBE_CONFIG" | head -1)
+    [[ -z "$header" ]] && header=$(grep -v '^$' "$VIBE_CONFIG" | head -1 || echo "")
+    
+    {
+      echo "$header"
+      jq -r '.[] | "[[mcp_servers]]\nname = \"\(.key)\"\ntransport = \"stdio\"\ncommand = \"\(.value.command)\"\n\(.value.args | if length > 0 then "args = [" + (map("\"\(.)\"") | join(", ")) + "]\n" else "" end)\(.value.env | if type == "object" then "env = { " + (to_entries | map("\(.key) = \"\(.value)\"") | join(", ") + " }\n" else "" end)"' "$MASTER_CONFIG" 2>/dev/null || true
+    } > "$VIBE_CONFIG.tmp" && mv "$VIBE_CONFIG.tmp" "$VIBE_CONFIG"
+    
     log_success "Vibe synced"
   else
     log_info "Vibe config not found"
@@ -349,28 +191,28 @@ PYTHON
 status() {
   echo -e "${BLUE}=== MCP Status ===${NC}\n"
 
-  echo -e "${BLUE}Zed:${NC} $(python3 -c "import json; print(len(json.load(open('$ZED_CONFIG'))['context_servers']))" 2>/dev/null || echo 0) servers"
-  python3 -c "import json; print('\\n'.join(['  - ' + k for k in json.load(open('$ZED_CONFIG'))['context_servers'].keys()]))" 2>/dev/null
+  echo -e "${BLUE}Zed:${NC} $(jq '(.context_servers // {}) | length' "$ZED_CONFIG" 2>/dev/null || echo 0) servers"
+  jq -r '(.context_servers // {}) | keys[] | "  - \(.)"' "$ZED_CONFIG" 2>/dev/null || true
   echo ""
 
-  echo -e "${BLUE}Claude:${NC} $(python3 -c "import json; print(len(json.load(open('$CLAUDE_CONFIG'))['mcpServers']))" 2>/dev/null || echo 0) servers"
-  python3 -c "import json; print('\\n'.join(['  - ' + k for k in json.load(open('$CLAUDE_CONFIG'))['mcpServers'].keys()]))" 2>/dev/null
+  echo -e "${BLUE}Claude:${NC} $(jq '(.mcpServers // {}) | length' "$CLAUDE_CONFIG" 2>/dev/null || echo 0) servers"
+  jq -r '(.mcpServers // {}) | keys[] | "  - \(.)"' "$CLAUDE_CONFIG" 2>/dev/null || true
   echo ""
 
-  echo -e "${BLUE}Amp:${NC} $(python3 -c "import json; print(len(json.load(open('$AMP_CONFIG'))['amp.mcpServers']))" 2>/dev/null || echo 0) servers"
-  python3 -c "import json; print('\\n'.join(['  - ' + k for k in json.load(open('$AMP_CONFIG'))['amp.mcpServers'].keys()]))" 2>/dev/null
+  echo -e "${BLUE}Amp:${NC} $(jq '(.["amp.mcpServers"] // {}) | length' "$AMP_CONFIG" 2>/dev/null || echo 0) servers"
+  jq -r '(.["amp.mcpServers"] // {}) | keys[] | "  - \(.)"' "$AMP_CONFIG" 2>/dev/null || true
   echo ""
 
-  echo -e "${BLUE}Kilo-code:${NC} $(python3 -c "import json; print(len(json.load(open('$KILO_CONFIG'))['mcpServers']))" 2>/dev/null || echo 0) servers"
-  python3 -c "import json; print('\\n'.join(['  - ' + k for k in json.load(open('$KILO_CONFIG'))['mcpServers'].keys()]))" 2>/dev/null
+  echo -e "${BLUE}Kilo-code:${NC} $(jq '(.mcpServers // {}) | length' "$KILO_CONFIG" 2>/dev/null || echo 0) servers"
+  jq -r '(.mcpServers // {}) | keys[] | "  - \(.)"' "$KILO_CONFIG" 2>/dev/null || true
   echo ""
 
-  echo -e "${BLUE}Qwen:${NC} $(python3 -c "import json; print(len(json.load(open('$QWEN_CONFIG'))['mcpServers']))" 2>/dev/null || echo 0) servers"
-  python3 -c "import json; print('\\n'.join(['  - ' + k for k in json.load(open('$QWEN_CONFIG'))['mcpServers'].keys()]))" 2>/dev/null
+  echo -e "${BLUE}Qwen:${NC} $(jq '(.mcpServers // {}) | length' "$QWEN_CONFIG" 2>/dev/null || echo 0) servers"
+  jq -r '(.mcpServers // {}) | keys[] | "  - \(.)"' "$QWEN_CONFIG" 2>/dev/null || true
   echo ""
 
-  echo -e "${BLUE}OpenCode:${NC} $(python3 -c "import json; print(len(json.load(open('$OPENCODE_CONFIG'))['mcp']))" 2>/dev/null || echo 0) servers"
-  python3 -c "import json; print('\\n'.join(['  - ' + k for k in json.load(open('$OPENCODE_CONFIG'))['mcp'].keys()]))" 2>/dev/null
+  echo -e "${BLUE}OpenCode:${NC} $(jq '(.mcp // {}) | length' "$OPENCODE_CONFIG" 2>/dev/null || echo 0) servers"
+  jq -r '(.mcp // {}) | keys[] | "  - \(.)"' "$OPENCODE_CONFIG" 2>/dev/null || true
 }
 
 clear_backups() {
@@ -399,6 +241,7 @@ case "$1" in
     sync_trae
     sync_qwen
     sync_opencode
+    sync_codebuddy
     sync_vibe
     log_success "Done!"
     ;;
@@ -409,6 +252,7 @@ case "$1" in
     backup "$CLAUDE_CONFIG" claude
     backup "$KILO_CONFIG" kilo
     backup "$QWEN_CONFIG" qwen
+    backup "$CODEBUDDY_CONFIG" codebuddy
     backup "$VIBE_CONFIG" vibe
     ;;
   clear-backups|clear)

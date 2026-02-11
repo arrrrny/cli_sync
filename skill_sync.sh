@@ -15,7 +15,7 @@ PRIVATE_SKILLS_DIR="${SCRIPT_DIR}/private_skills"
 mkdir -p "$BACKUP_DIR" "$SKILLS_DIR" "$PRIVATE_SKILLS_DIR"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 
-ZED_SKILLS_DIR="${HOME}/.config/zed"
+ZED_SKILLS_DIR="${HOME}/.config/zed/skills"
 CLAIRE_SKILLS_DIR="${HOME}/.claude/skills"
 AMP_SKILLS_DIR="${HOME}/.config/amp/skills"
 KIRO_SKILLS_DIR="${HOME}/.kiro/skills"
@@ -40,6 +40,8 @@ backup() {
 sync_zed_skills() {
   log_info "Syncing Zed skills..."
   backup "$ZED_SKILLS_DIR" "zed_skills"
+
+  mkdir -p "$ZED_SKILLS_DIR"
 
   # Copy all skills from both public and private directories to Zed
   if [[ -d "$SKILLS_DIR" ]]; then
