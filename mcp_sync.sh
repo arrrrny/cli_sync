@@ -146,6 +146,7 @@ sync_opencode() {
       to_entries | map({
         key: .key,
         value: (.value + {enabled: true, type: "local"} |
+        if .env then .environment = .env | del(.env) else . end |
         .command = (if .command | type == "string" then ([.command] + (.args // [])) else .command end) |
         del(.args))
       }) | from_entries
