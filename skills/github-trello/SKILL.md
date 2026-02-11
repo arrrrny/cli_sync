@@ -1,5 +1,5 @@
 ---
-name: github_trello
+name: github-trello
 description: Links Trello cards with GitHub issues and pull requests for integrated project management
 version: 1.0.0
 author: cli_sync

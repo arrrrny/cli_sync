@@ -1,5 +1,5 @@
 ---
-name: readme_generator
+name: readme-generator
 description: Generates professional README.md files for projects with customizable templates
 version: 1.0.0
 author: cli_sync

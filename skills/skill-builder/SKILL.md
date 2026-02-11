@@ -1,5 +1,5 @@
 ---
-name: skill_builder
+name: skill-builder
 description: A comprehensive guide and template for creating standardized skills
 version: 1.0.0
 author: cli_sync
@@ -17,7 +17,7 @@ When creating skills for the cli_sync framework, follow this standardized format
 ### YAML Front Matter (Required)
 ```yaml
 ---
-name: unique_skill_name
+name: unique-skill-name
 description: Brief but comprehensive description of what the skill does
 version: 1.0.0
 author: your_name_or_organization
@@ -27,14 +27,14 @@ author: your_name_or_organization
 ### Key Points for Each Field:
 
 #### Name
-- Use lowercase with underscores or hyphens for multi-word names
+- Use lowercase with  hyphens for multi-word names
 - Make it descriptive and unique
-- Examples: `file_backup`, `git_commit_helper`, `docker_manager`
+- Examples: `file-backup`, `git-commit-helper`, `docker-manager`
 
 #### Author
 - Your name, username, or organization
 - Helps track ownership and maintenance
-- Examples: `john_doe`, `my_company`, `team_alpha`
+- Examples: `john-doe`, `my-company`, `team-alpha`
 
 #### Version
 - Follow semantic versioning (MAJOR.MINOR.PATCH)
@@ -107,7 +107,7 @@ example_skill --param1 "value1"
 
 ### Advanced usage
 ```
-example_skill --param1 "value1" --param2 "value2"
+example-skill --param1 "value1" --param2 "value2"
 ```
 
 ## Implementation

@@ -1,5 +1,5 @@
 ---
-name: changelog_updater
+name: changelog-updater
 description: Updates the changelog file in SEM (Semantic Versioning and Metadata) format
 version: 1.0.0
 author: cli_sync
