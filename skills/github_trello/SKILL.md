@@ -1,7 +1,11 @@
-
 ---
-name: GitHub-Trello Integration Skill
-description: Links Trello cards with github issues, PRs
+name: github_trello
+description: Links Trello cards with GitHub issues and pull requests for integrated project management
+version: 1.0.0
+author: cli_sync
+---
+
+# GitHub-Trello Integration Skill
 
 ## Overview
 This skill enables seamless integration between GitHub repositories and Trello boards, allowing for effective project management and issue tracking across both platforms.
