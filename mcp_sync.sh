@@ -25,6 +25,8 @@ VIBE_CONFIG="/Users/arrrrny/.vibe/config.toml"
 QWEN_CONFIG="${HOME}/.qwen/settings.json"
 CODEBUDDY_CONFIG="${HOME}/.codebuddy/.mcp.json"
 ANTIGRAVITY_CONFIG="/Users/arrrrny/.gemini/antigravity/mcp_config.json"
+QODER_CONFIG="${HOME}/.qoder.json"
+AUGGIE_CONFIG="${HOME}/.augment/settings.json"
 
 KIRO_BIN="/Applications/Kiro CLI.app/Contents/MacOS/kiro-cli"
 
@@ -206,6 +208,32 @@ sync_vibe() {
   fi
 }
 
+sync_qoder() {
+  log_info "Syncing Qoder..."
+  if [[ -f "$QODER_CONFIG" ]]; then
+    backup "$QODER_CONFIG" "qoder"
+
+    jq -s '.[0] * {mcpServers: .[1]}' "$QODER_CONFIG" "$MASTER_CONFIG" > "$QODER_CONFIG.tmp" && mv "$QODER_CONFIG.tmp" "$QODER_CONFIG"
+
+    log_success "Qoder synced"
+  else
+    log_info "Qoder config not found"
+  fi
+}
+
+sync_auggie() {
+  log_info "Syncing Auggie..."
+  if [[ -f "$AUGGIE_CONFIG" ]]; then
+    backup "$AUGGIE_CONFIG" "auggie"
+
+    jq -s '.[0] * {mcpServers: .[1]}' "$AUGGIE_CONFIG" "$MASTER_CONFIG" > "$AUGGIE_CONFIG.tmp" && mv "$AUGGIE_CONFIG.tmp" "$AUGGIE_CONFIG"
+
+    log_success "Auggie synced"
+  else
+    log_info "Auggie config not found"
+  fi
+}
+
 status() {
   echo -e "${BLUE}=== MCP Status ===${NC}\n"
 
@@ -239,6 +267,14 @@ status() {
 
   echo -e "${BLUE}Antigravity:${NC} $(jq '(.mcpServers // {}) | length' "$ANTIGRAVITY_CONFIG" 2>/dev/null || echo 0) servers"
   jq -r '(.mcpServers // {}) | keys[] | "  - \(.)"' "$ANTIGRAVITY_CONFIG" 2>/dev/null || true
+  echo ""
+
+  echo -e "${BLUE}Qoder:${NC} $(jq '(.mcpServers // {}) | length' "$QODER_CONFIG" 2>/dev/null || echo 0) servers"
+  jq -r '(.mcpServers // {}) | keys[] | "  - \(.)"' "$QODER_CONFIG" 2>/dev/null || true
+  echo ""
+
+  echo -e "${BLUE}Auggie:${NC} $(jq '(.mcpServers // {}) | length' "$AUGGIE_CONFIG" 2>/dev/null || echo 0) servers"
+  jq -r '(.mcpServers // {}) | keys[] | "  - \(.)"' "$AUGGIE_CONFIG" 2>/dev/null || true
 }
 
 clear_backups() {
@@ -258,11 +294,11 @@ clear_backups() {
 
 case "$1" in
   sync)
+    sync_auggie
+    sync_qoder
     sync_zed
     sync_amp
     sync_claude
-    sync_kiro
-    sync_kilo
     sync_factory
     sync_trae
     sync_qwen
@@ -270,6 +306,8 @@ case "$1" in
     sync_codebuddy
     sync_antigravity
     sync_vibe
+    sync_kiro
+    sync_kilo
     log_success "Done!"
     ;;
   status) status ;;
@@ -282,6 +320,8 @@ case "$1" in
     backup "$CODEBUDDY_CONFIG" codebuddy
     backup "$ANTIGRAVITY_CONFIG" antigravity
     backup "$VIBE_CONFIG" vibe
+    backup "$QODER_CONFIG" qoder
+    backup "$AUGGIE_CONFIG" auggie
     ;;
   clear-backups|clear)
     clear_backups

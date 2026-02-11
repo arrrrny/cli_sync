@@ -25,6 +25,12 @@ TRAE_SKILLS_DIR="${HOME}/Library/Application Support/Trae/User/skills"
 QWEN_SKILLS_DIR="${HOME}/.qwen/skills"
 OPENCODE_SKILLS_DIR="${HOME}/.config/opencode/skills"
 VIBE_SKILLS_DIR="${HOME}/.vibe/skills"
+VIBE_CONFIG="${HOME}/.vibe/config.toml"
+CODEBUDDY_SKILLS_DIR="${HOME}/.codebuddy/skills"
+AUGGIE_SKILLS_DIR="${HOME}/.augment/skills"
+QODER_SKILLS_DIR="${HOME}/.qoder/skills"
+
+TRUSTED_DIR="/Users/arrrrny/Developer/cli_sync"
 
 log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
 log_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
@@ -199,6 +205,308 @@ sync_vibe_skills() {
   log_success "Vibe skills synced"
 }
 
+sync_codebuddy_skills() {
+  log_info "Syncing Codebuddy skills..."
+  backup "$CODEBUDDY_SKILLS_DIR" "codebuddy_skills"
+
+  mkdir -p "$CODEBUDDY_SKILLS_DIR"
+
+  # Copy all skills from both public and private directories to Codebuddy
+  if [[ -d "$SKILLS_DIR" ]]; then
+    rsync -av --delete "$SKILLS_DIR/" "$CODEBUDDY_SKILLS_DIR/" 2>/dev/null || true
+  fi
+
+  if [[ -d "$PRIVATE_SKILLS_DIR" ]]; then
+    rsync -av "$PRIVATE_SKILLS_DIR/" "$CODEBUDDY_SKILLS_DIR/" 2>/dev/null || true
+  fi
+
+  log_success "Codebuddy skills synced"
+}
+
+sync_auggie_skills() {
+  log_info "Syncing Auggie skills..."
+  backup "$AUGGIE_SKILLS_DIR" "auggie_skills"
+
+  mkdir -p "$AUGGIE_SKILLS_DIR"
+
+  # Copy all skills from both public and private directories to Auggie
+  if [[ -d "$SKILLS_DIR" ]]; then
+    rsync -av --delete "$SKILLS_DIR/" "$AUGGIE_SKILLS_DIR/" 2>/dev/null || true
+  fi
+
+  if [[ -d "$PRIVATE_SKILLS_DIR" ]]; then
+    rsync -av "$PRIVATE_SKILLS_DIR/" "$AUGGIE_SKILLS_DIR/" 2>/dev/null || true
+  fi
+
+  log_success "Auggie skills synced"
+}
+
+sync_qoder_skills() {
+  log_info "Syncing Qoder skills..."
+  backup "$QODER_SKILLS_DIR" "qoder_skills"
+
+  mkdir -p "$QODER_SKILLS_DIR"
+
+  # Copy all skills from both public and private directories to Qoder
+  if [[ -d "$SKILLS_DIR" ]]; then
+    rsync -av --delete "$SKILLS_DIR/" "$QODER_SKILLS_DIR/" 2>/dev/null || true
+  fi
+
+  if [[ -d "$PRIVATE_SKILLS_DIR" ]]; then
+    rsync -av "$PRIVATE_SKILLS_DIR/" "$QODER_SKILLS_DIR/" 2>/dev/null || true
+  fi
+
+  log_success "Qoder skills synced"
+}
+
+add_zed_trusted_dir() {
+  log_info "Zed uses worktree trust - no global config needed"
+}
+
+add_claude_trusted_dir() {
+  log_info "Claude Code uses project-level .mcp.json for trust"
+}
+
+add_amp_trusted_dir() {
+  log_info "Amp uses project-level mcp.json for trust"
+}
+
+add_kiro_trusted_dir() {
+  log_info "Kiro uses project-level config for trust"
+}
+
+add_kilo_trusted_dir() {
+  log_info "Kilo uses project-level config for trust"
+}
+
+add_factory_trusted_dir() {
+  log_info "Factory uses project-level config for trust"
+}
+
+add_trae_trusted_dir() {
+  log_info "Trae uses project-level mcp.json for trust"
+}
+
+add_qwen_trusted_dir() {
+  log_info "Qwen uses project-level config for trust"
+}
+
+add_opencode_trusted_dir() {
+  log_info "OpenCode uses project-level config for trust"
+}
+
+add_vibe_trusted_dir() {
+  log_info "Vibe uses project-level config for trust"
+}
+
+add_claude_trusted_dir() {
+  log_info "Adding trusted dir to Claude..."
+  local config="${HOME}/.claude/settings.json"
+  if [[ -f "$config" ]]; then
+    local current
+    current=$(jq -r '."trusted-directories" // [] | join("\n")' "$config" 2>/dev/null || echo "")
+    if ! echo "$current" | grep -q "^${TRUSTED_DIR}$"; then
+      jq --arg dir "$TRUSTED_DIR" '."trusted-directories" = (."trusted-directories" // []) + [$dir]' "$config" > "${config}.tmp" && mv "${config}.tmp" "$config"
+      log_success "Claude trusted dir added"
+    else
+      log_info "Claude already has trusted dir"
+    fi
+  else
+    log_error "Claude config not found"
+  fi
+}
+
+add_amp_trusted_dir() {
+  log_info "Adding trusted dir to Amp..."
+  local config="${HOME}/.config/amp/settings.json"
+  if [[ -f "$config" ]]; then
+    local current
+    current=$(jq -r '."trusted-directories" // [] | join("\n")' "$config" 2>/dev/null || echo "")
+    if ! echo "$current" | grep -q "^${TRUSTED_DIR}$"; then
+      jq --arg dir "$TRUSTED_DIR" '."trusted-directories" = (."trusted-directories" // []) + [$dir]' "$config" > "${config}.tmp" && mv "${config}.tmp" "$config"
+      log_success "Amp trusted dir added"
+    else
+      log_info "Amp already has trusted dir"
+    fi
+  else
+    log_error "Amp config not found"
+  fi
+}
+
+add_kiro_trusted_dir() {
+  log_info "Adding trusted dir to Kiro..."
+  local config="${HOME}/.kiro/settings.json"
+  mkdir -p "$(dirname "$config")"
+  if [[ -f "$config" ]]; then
+    local current
+    current=$(jq -r '."trusted-directories" // [] | join("\n")' "$config" 2>/dev/null || echo "")
+    if ! echo "$current" | grep -q "^${TRUSTED_DIR}$"; then
+      jq --arg dir "$TRUSTED_DIR" '."trusted-directories" = (."trusted-directories" // []) + [$dir]' "$config" > "${config}.tmp" && mv "${config}.tmp" "$config"
+      log_success "Kiro trusted dir added"
+    else
+      log_info "Kiro already has trusted dir"
+    fi
+  else
+    echo '{}' > "$config"
+    jq --arg dir "$TRUSTED_DIR" '."trusted-directories" = [$dir]' "$config" > "${config}.tmp" && mv "${config}.tmp" "$config"
+    log_success "Kiro trusted dir added"
+  fi
+}
+
+add_kilo_trusted_dir() {
+  log_info "Adding trusted dir to Kilo..."
+  local config="${HOME}/.kilocode/settings.json"
+  mkdir -p "$(dirname "$config")"
+  if [[ -f "$config" ]]; then
+    local current
+    current=$(jq -r '."trusted-directories" // [] | join("\n")' "$config" 2>/dev/null || echo "")
+    if ! echo "$current" | grep -q "^${TRUSTED_DIR}$"; then
+      jq --arg dir "$TRUSTED_DIR" '."trusted-directories" = (."trusted-directories" // []) + [$dir]' "$config" > "${config}.tmp" && mv "${config}.tmp" "$config"
+      log_success "Kilo trusted dir added"
+    else
+      log_info "Kilo already has trusted dir"
+    fi
+  else
+    echo '{}' > "$config"
+    jq --arg dir "$TRUSTED_DIR" '."trusted-directories" = [$dir]' "$config" > "${config}.tmp" && mv "${config}.tmp" "$config"
+    log_success "Kilo trusted dir added"
+  fi
+}
+
+add_factory_trusted_dir() {
+  log_info "Adding trusted dir to Factory..."
+  local config="${HOME}/.factory/settings.json"
+  mkdir -p "$(dirname "$config")"
+  if [[ -f "$config" ]]; then
+    local current
+    current=$(jq -r '."trusted-directories" // [] | join("\n")' "$config" 2>/dev/null || echo "")
+    if ! echo "$current" | grep -q "^${TRUSTED_DIR}$"; then
+      jq --arg dir "$TRUSTED_DIR" '."trusted-directories" = (."trusted-directories" // []) + [$dir]' "$config" > "${config}.tmp" && mv "${config}.tmp" "$config"
+      log_success "Factory trusted dir added"
+    else
+      log_info "Factory already has trusted dir"
+    fi
+  else
+    echo '{}' > "$config"
+    jq --arg dir "$TRUSTED_DIR" '."trusted-directories" = [$dir]' "$config" > "${config}.tmp" && mv "${config}.tmp" "$config"
+    log_success "Factory trusted dir added"
+  fi
+}
+
+add_trae_trusted_dir() {
+  log_info "Adding trusted dir to Trae..."
+  local config="${HOME}/Library/Application Support/Trae/User/settings.json"
+  mkdir -p "$(dirname "$config")"
+  if [[ -f "$config" ]]; then
+    local current
+    current=$(jq -r '."trusted-directories" // [] | join("\n")' "$config" 2>/dev/null || echo "")
+    if ! echo "$current" | grep -q "^${TRUSTED_DIR}$"; then
+      jq --arg dir "$TRUSTED_DIR" '."trusted-directories" = (."trusted-directories" // []) + [$dir]' "$config" > "${config}.tmp" && mv "${config}.tmp" "$config"
+      log_success "Trae trusted dir added"
+    else
+      log_info "Trae already has trusted dir"
+    fi
+  else
+    echo '{}' > "$config"
+    jq --arg dir "$TRUSTED_DIR" '."trusted-directories" = [$dir]' "$config" > "${config}.tmp" && mv "${config}.tmp" "$config"
+    log_success "Trae trusted dir added"
+  fi
+}
+
+add_qwen_trusted_dir() {
+  log_info "Adding trusted dir to Qwen..."
+  local config="${HOME}/.qwen/settings.json"
+  if [[ -f "$config" ]]; then
+    local current
+    current=$(jq -r '."trusted-directories" // [] | join("\n")' "$config" 2>/dev/null || echo "")
+    if ! echo "$current" | grep -q "^${TRUSTED_DIR}$"; then
+      jq --arg dir "$TRUSTED_DIR" '."trusted-directories" = (."trusted-directories" // []) + [$dir]' "$config" > "${config}.tmp" && mv "${config}.tmp" "$config"
+      log_success "Qwen trusted dir added"
+    else
+      log_info "Qwen already has trusted dir"
+    fi
+  else
+    log_error "Qwen config not found"
+  fi
+}
+
+add_opencode_trusted_dir() {
+  log_info "Adding trusted dir to OpenCode..."
+  local config="${HOME}/.config/opencode/opencode.json"
+  if [[ -f "$config" ]]; then
+    local current
+    current=$(jq -r '.trustedDirectories // [] | join("\n")' "$config" 2>/dev/null || echo "")
+    if ! echo "$current" | grep -q "^${TRUSTED_DIR}$"; then
+      jq --arg dir "$TRUSTED_DIR" 'if .trustedDirectories then .trustedDirectories += [$dir] else .trustedDirectories = [$dir] end' "$config" > "${config}.tmp" && mv "${config}.tmp" "$config"
+      log_success "OpenCode trusted dir added"
+    else
+      log_info "OpenCode already has trusted dir"
+    fi
+  else
+    log_error "OpenCode config not found"
+  fi
+}
+
+add_vibe_trusted_dir() {
+  log_info "Adding trusted dir to Vibe..."
+  if [[ -f "$VIBE_CONFIG" ]]; then
+    if ! grep -q "^trusted_dirs.*${TRUSTED_DIR}" "$VIBE_CONFIG" 2>/dev/null; then
+      sed -i "s|^trusted_dirs = \[|trusted_dirs = [\"${TRUSTED_DIR}\", |g" "$VIBE_CONFIG" 2>/dev/null || true
+      if ! grep -q "${TRUSTED_DIR}" "$VIBE_CONFIG"; then
+        echo "trusted_dirs = [\"${TRUSTED_DIR}\"]" >> "$VIBE_CONFIG"
+      fi
+      log_success "Vibe trusted dir added"
+    else
+      log_info "Vibe already has trusted dir"
+    fi
+  else
+    log_error "Vibe config not found"
+  fi
+}
+
+add_codebuddy_trusted_dir() {
+  log_info "Adding trusted dir to Codebuddy..."
+  local config="${HOME}/.codebuddy/settings.json"
+  if [[ -f "$config" ]]; then
+    local current
+    current=$(jq -r '.trustedDirectories // [] | join("\n")' "$config" 2>/dev/null || echo "")
+    if ! echo "$current" | grep -q "^${TRUSTED_DIR}$" && ! echo "$current" | grep -q "^${TRUSTED_DIR}/\*\*"; then
+      jq --arg dir "${TRUSTED_DIR}/**" 'if .trustedDirectories then .trustedDirectories += [$dir] else .trustedDirectories = [$dir] end' "$config" > "${config}.tmp" && mv "${config}.tmp" "$config"
+      log_success "Codebuddy trusted dir added"
+    else
+      log_info "Codebuddy already has trusted dir"
+    fi
+  else
+    log_error "Codebuddy settings not found"
+  fi
+}
+
+add_auggie_trusted_dir() {
+  log_info "Auggie uses project-level config for trust"
+}
+
+add_qoder_trusted_dir() {
+  log_info "Qoder uses project-level config for trust"
+}
+
+add_trusted_dirs() {
+  log_info "Adding trusted directories to all CLIs..."
+  add_zed_trusted_dir
+  add_claude_trusted_dir
+  add_amp_trusted_dir
+  add_kiro_trusted_dir
+  add_kilo_trusted_dir
+  add_factory_trusted_dir
+  add_trae_trusted_dir
+  add_qwen_trusted_dir
+  add_opencode_trusted_dir
+  add_vibe_trusted_dir
+  add_codebuddy_trusted_dir
+  add_auggie_trusted_dir
+  add_qoder_trusted_dir
+  log_success "Trusted directories added to all CLIs"
+}
+
 status() {
   echo -e "${BLUE}=== Skills Status ===${NC}\n"
 
@@ -212,6 +520,9 @@ status() {
   echo -e "${BLUE}Qwen:${NC} $(find "$QWEN_SKILLS_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l) skills"
   echo -e "${BLUE}OpenCode:${NC} $(find "$OPENCODE_SKILLS_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l) skills"
   echo -e "${BLUE}Vibe:${NC} $(find "$VIBE_SKILLS_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l) skills"
+  echo -e "${BLUE}Codebuddy:${NC} $(find "$CODEBUDDY_SKILLS_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l) skills"
+  echo -e "${BLUE}Auggie:${NC} $(find "$AUGGIE_SKILLS_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l) skills"
+  echo -e "${BLUE}Qoder:${NC} $(find "$QODER_SKILLS_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l) skills"
 
   echo -e "\n${BLUE}Source Directories:${NC}"
   echo -e "${BLUE}Public Skills:${NC} $(find "$SKILLS_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l) directories"
@@ -245,6 +556,9 @@ case "$1" in
     sync_qwen_skills
     sync_opencode_skills
     sync_vibe_skills
+    sync_codebuddy_skills
+    sync_auggie_skills
+    sync_qoder_skills
     log_success "Skills sync completed!"
     ;;
   status) status ;;
@@ -259,15 +573,21 @@ case "$1" in
     backup "$QWEN_SKILLS_DIR" qwen_skills
     backup "$OPENCODE_SKILLS_DIR" opencode_skills
     backup "$VIBE_SKILLS_DIR" vibe_skills
+    backup "$CODEBUDDY_SKILLS_DIR" codebuddy_skills
+    backup "$AUGGIE_SKILLS_DIR" auggie_skills
+    backup "$QODER_SKILLS_DIR" qoder_skills
     ;;
   clear-backups|clear)
     clear_backups
     ;;
+  trust|add-trusted-dirs|add-trusted)
+    add_trusted_dirs
+    ;;
   help|--help|-h)
-    echo "Usage: $0 [sync|status|backup|clear-backups]"
+    echo "Usage: $0 [sync|status|backup|clear-backups|trust]"
     ;;
   *)
-    echo "Usage: $0 [sync|status|backup|clear-backups]"
+    echo "Usage: $0 [sync|status|backup|clear-backups|trust]"
     exit 1
     ;;
 esac

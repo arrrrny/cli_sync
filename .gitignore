@@ -1,3 +1,6 @@
 mcp_sync_configs
 private_skills
 skill_sync_configs
+
+# Stakpak session files
+.stakpak/session*
