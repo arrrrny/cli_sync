@@ -21,7 +21,7 @@ CLAUDE_CONFIG="${HOME}/.claude/settings.json"
 KILO_CONFIG="${HOME}/Library/Application Support/Trae/User/globalStorage/kilocode.kilo-code/settings/mcp_settings.json"
 FACTORY_CONFIG="/Users/arrrrny/.factory/mcp.json"
 OPENCODE_CONFIG="/Users/arrrrny/.config/opencode/opencode.json"
-VIBE_CONFIG="/Users/arrrrny/.vibe/config.toml"
+VIBE_CONFIG="${HOME}/.vibe/config.toml"
 QWEN_CONFIG="${HOME}/.qwen/settings.json"
 CODEBUDDY_CONFIG="${HOME}/.codebuddy/.mcp.json"
 ANTIGRAVITY_CONFIG="/Users/arrrrny/.gemini/antigravity/mcp_config.json"
@@ -42,6 +42,23 @@ strip_json_comments() {
   sed -e 's|//.*$||g' -e 's|/\*.*\*/||g' "$1"
 }
 
+generate_rendered_config() {
+  log_info "Generating rendered config..."
+
+  local rendered
+  rendered=$(jq '.' "$RAW_MASTER_CONFIG")
+
+  local rendered_file
+  rendered_file=$(mktemp)
+  echo "$rendered" > "$rendered_file"
+
+  envsubst < "$rendered_file" > "$RENDERED_MASTER_CONFIG"
+  rm "$rendered_file"
+
+  MASTER_CONFIG="$RENDERED_MASTER_CONFIG"
+  log_success "Rendered config generated"
+}
+
 sync_zed() {
   log_info "Syncing Zed..."
   backup "$ZED_CONFIG" "zed"
@@ -58,7 +75,9 @@ sync_amp() {
   log_info "Syncing Amp..."
   backup "$AMP_CONFIG" "amp"
 
-  jq -s '.[0] * {".mcpServers": .[1] | to_entries | map({key: .key, value: (.value + {enabled: true})}) | from_entries}' "$AMP_CONFIG" "$MASTER_CONFIG" > "$AMP_CONFIG.tmp" && mv "$AMP_CONFIG.tmp" "$AMP_CONFIG"
+  jq --argjson mcp "$(jq '.' "$MASTER_CONFIG")" '
+    . + {"amp.mcpServers": $mcp | to_entries | map({key: .key, value: (.value + {enabled: true})}) | from_entries}
+  ' "$AMP_CONFIG" > "$AMP_CONFIG.tmp" && mv "$AMP_CONFIG.tmp" "$AMP_CONFIG"
 
   log_success "Amp synced"
 }
@@ -67,7 +86,9 @@ sync_claude() {
   log_info "Syncing Claude..."
   backup "$CLAUDE_CONFIG" "claude"
 
-  jq -s '.[0] * {mcpServers: .[1]}' "$CLAUDE_CONFIG" "$MASTER_CONFIG" > "$CLAUDE_CONFIG.tmp" && mv "$CLAUDE_CONFIG.tmp" "$CLAUDE_CONFIG"
+  jq --argjson mcp "$(jq '.' "$MASTER_CONFIG")" '
+    . + {mcpServers: $mcp}
+  ' "$CLAUDE_CONFIG" > "$CLAUDE_CONFIG.tmp" && mv "$CLAUDE_CONFIG.tmp" "$CLAUDE_CONFIG"
 
   log_success "Claude synced"
 }
@@ -75,17 +96,31 @@ sync_claude() {
 sync_kiro() {
   log_info "Syncing Kiro CLI..."
   if [[ -x "$KIRO_BIN" ]]; then
+
+    local current_servers
+    current_servers=$("$KIRO_BIN" mcp list 2>/dev/null || echo "")
+
     while IFS= read -r name; do
       [[ -z "$name" ]] && continue
       cmd=$(jq -r ".[\"$name\"].command // empty" "$MASTER_CONFIG" 2>/dev/null)
       args=$(jq -r ".[\"$name\"].args | join(\" \") // \"\"" "$MASTER_CONFIG" 2>/dev/null || echo "")
+
       if [[ -n "$cmd" && "$cmd" != "null" ]]; then
-        if ! "$KIRO_BIN" mcp list 2>/dev/null | grep -q "^${name}$"; then
+        if ! echo "$current_servers" | grep -q "^${name}$"; then
           log_info "Adding $name to Kiro..."
           timeout 5 "$KIRO_BIN" mcp add "$name" "$cmd" $args 2>/dev/null || true
         fi
       fi
     done < <(jq -r 'keys[]' "$MASTER_CONFIG" 2>/dev/null || echo "")
+
+    while IFS= read -r name; do
+      [[ -z "$name" ]] && continue
+      if ! jq -e ".[\"$name\"]" "$MASTER_CONFIG" >/dev/null 2>&1; then
+        log_info "Removing $name from Kiro..."
+        timeout 5 "$KIRO_BIN" mcp remove "$name" 2>/dev/null || true
+      fi
+    done < <(echo "$current_servers")
+
     log_success "Kiro synced"
   else
     log_info "Kiro CLI not found"
@@ -96,7 +131,9 @@ sync_kilo() {
   log_info "Syncing Kilo-code..."
   backup "$KILO_CONFIG" "kilo"
 
-  jq -s '.[0] as $kilo | .[1] as $mcp | if $kilo.mcpServers == null then $kilo * {mcpServers: $mcp} else $kilo * {mcpServers: $mcp} end' "$KILO_CONFIG" "$MASTER_CONFIG" > "$KILO_CONFIG.tmp" && mv "$KILO_CONFIG.tmp" "$KILO_CONFIG"
+  jq --argjson mcp "$(jq '.' "$MASTER_CONFIG")" '
+    . + {mcpServers: $mcp}
+  ' "$KILO_CONFIG" > "$KILO_CONFIG.tmp" && mv "$KILO_CONFIG.tmp" "$KILO_CONFIG"
 
   log_success "Kilo synced"
 }
@@ -117,7 +154,9 @@ sync_trae() {
   if [[ -f "$TRAE_CONFIG" ]]; then
     backup "$TRAE_CONFIG" "trae"
 
-    jq -s '.[0] * {mcpServers: .[1] | to_entries | map({key: .key, value: (.value + {enabled: true})}) | from_entries}' "$TRAE_CONFIG" "$MASTER_CONFIG" > "$TRAE_CONFIG.tmp" && mv "$TRAE_CONFIG.tmp" "$TRAE_CONFIG"
+    jq --argjson mcp "$(jq '.' "$MASTER_CONFIG")" '
+      . + {mcpServers: $mcp | to_entries | map({key: .key, value: (.value + {enabled: true})}) | from_entries}
+    ' "$TRAE_CONFIG" > "$TRAE_CONFIG.tmp" && mv "$TRAE_CONFIG.tmp" "$TRAE_CONFIG"
 
     log_success "Trae synced"
   else
@@ -130,7 +169,9 @@ sync_qwen() {
   if [[ -f "$QWEN_CONFIG" ]]; then
     backup "$QWEN_CONFIG" "qwen"
 
-    jq -s '.[0] * {mcpServers: .[1]}' "$QWEN_CONFIG" "$MASTER_CONFIG" > "$QWEN_CONFIG.tmp" && mv "$QWEN_CONFIG.tmp" "$QWEN_CONFIG"
+    jq --argjson mcp "$(jq '.' "$MASTER_CONFIG")" '
+      . + {mcpServers: $mcp}
+    ' "$QWEN_CONFIG" > "$QWEN_CONFIG.tmp" && mv "$QWEN_CONFIG.tmp" "$QWEN_CONFIG"
 
     log_success "Qwen synced"
   else
@@ -154,7 +195,7 @@ sync_opencode() {
       }) | from_entries
     ' "$MASTER_CONFIG")
 
-    jq --argjson mcp "$opencode_mcp" '. * {$mcp}' "$OPENCODE_CONFIG" > "$OPENCODE_CONFIG.tmp" && mv "$OPENCODE_CONFIG.tmp" "$OPENCODE_CONFIG"
+    jq --argjson mcp "$opencode_mcp" '. + {$mcp}' "$OPENCODE_CONFIG" > "$OPENCODE_CONFIG.tmp" && mv "$OPENCODE_CONFIG.tmp" "$OPENCODE_CONFIG"
 
     log_success "OpenCode synced"
   else
@@ -167,7 +208,9 @@ sync_codebuddy() {
   if [[ -f "$CODEBUDDY_CONFIG" ]]; then
     backup "$CODEBUDDY_CONFIG" "codebuddy"
 
-    jq -s '.[0] * {mcpServers: .[1]}' "$CODEBUDDY_CONFIG" "$MASTER_CONFIG" > "$CODEBUDDY_CONFIG.tmp" && mv "$CODEBUDDY_CONFIG.tmp" "$CODEBUDDY_CONFIG"
+    jq --argjson mcp "$(jq '.' "$MASTER_CONFIG")" '
+      . + {mcpServers: $mcp}
+    ' "$CODEBUDDY_CONFIG" > "$CODEBUDDY_CONFIG.tmp" && mv "$CODEBUDDY_CONFIG.tmp" "$CODEBUDDY_CONFIG"
 
     log_success "Codebuddy synced"
   else
@@ -180,7 +223,9 @@ sync_antigravity() {
   if [[ -f "$ANTIGRAVITY_CONFIG" ]]; then
     backup "$ANTIGRAVITY_CONFIG" "antigravity"
 
-    jq -s '.[0] * {mcpServers: .[1]}' "$ANTIGRAVITY_CONFIG" "$MASTER_CONFIG" > "$ANTIGRAVITY_CONFIG.tmp" && mv "$ANTIGRAVITY_CONFIG.tmp" "$ANTIGRAVITY_CONFIG"
+    jq --argjson mcp "$(jq '.' "$MASTER_CONFIG")" '
+      . + {mcpServers: $mcp}
+    ' "$ANTIGRAVITY_CONFIG" > "$ANTIGRAVITY_CONFIG.tmp" && mv "$ANTIGRAVITY_CONFIG.tmp" "$ANTIGRAVITY_CONFIG"
 
     log_success "Antigravity synced"
   else
@@ -193,12 +238,8 @@ sync_vibe() {
   if [[ -f "$VIBE_CONFIG" ]]; then
     backup "$VIBE_CONFIG" "vibe"
 
-    local header
-    header=$(sed -n '/^\[\[mcp_servers\]\]/p;1,/^[[mcp_servers]]/p' "$VIBE_CONFIG" | head -1)
-    [[ -z "$header" ]] && header=$(grep -v '^$' "$VIBE_CONFIG" | head -1 || echo "")
-
     {
-      echo "$header"
+      echo "[[mcp_servers]]"
       jq -r '.[] | "[[mcp_servers]]\nname = \"\(.key)\"\ntransport = \"stdio\"\ncommand = \"\(.value.command)\"\n\(.value.args | if length > 0 then "args = [" + (map("\"\(.)\"") | join(", ")) + "]\n" else "" end)\(.value.env | if type == "object" then "env = { " + (to_entries | map("\(.key) = \"\(.value)\"") | join(", ") + " }\n" else "" end)"' "$MASTER_CONFIG" 2>/dev/null || true
     } > "$VIBE_CONFIG.tmp" && mv "$VIBE_CONFIG.tmp" "$VIBE_CONFIG"
 
@@ -213,7 +254,9 @@ sync_qoder() {
   if [[ -f "$QODER_CONFIG" ]]; then
     backup "$QODER_CONFIG" "qoder"
 
-    jq -s '.[0] * {mcpServers: .[1]}' "$QODER_CONFIG" "$MASTER_CONFIG" > "$QODER_CONFIG.tmp" && mv "$QODER_CONFIG.tmp" "$QODER_CONFIG"
+    jq --argjson mcp "$(jq '.' "$MASTER_CONFIG")" '
+      . + {mcpServers: $mcp}
+    ' "$QODER_CONFIG" > "$QODER_CONFIG.tmp" && mv "$QODER_CONFIG.tmp" "$QODER_CONFIG"
 
     log_success "Qoder synced"
   else
@@ -226,7 +269,9 @@ sync_auggie() {
   if [[ -f "$AUGGIE_CONFIG" ]]; then
     backup "$AUGGIE_CONFIG" "auggie"
 
-    jq -s '.[0] * {mcpServers: .[1]}' "$AUGGIE_CONFIG" "$MASTER_CONFIG" > "$AUGGIE_CONFIG.tmp" && mv "$AUGGIE_CONFIG.tmp" "$AUGGIE_CONFIG"
+    jq --argjson mcp "$(jq '.' "$MASTER_CONFIG")" '
+      . + {mcpServers: $mcp}
+    ' "$AUGGIE_CONFIG" > "$AUGGIE_CONFIG.tmp" && mv "$AUGGIE_CONFIG.tmp" "$AUGGIE_CONFIG"
 
     log_success "Auggie synced"
   else
@@ -237,44 +282,64 @@ sync_auggie() {
 status() {
   echo -e "${BLUE}=== MCP Status ===${NC}\n"
 
-  echo -e "${BLUE}Zed:${NC} $(jq '(.context_servers // {}) | length' "$ZED_CONFIG" 2>/dev/null || echo 0) servers"
-  jq -r '(.context_servers // {}) | keys[] | "  - \(.)"' "$ZED_CONFIG" 2>/dev/null || true
+  local zed_count
+  zed_count=$(jq ".context_servers // {} | length" "$ZED_CONFIG" 2>/dev/null || echo 0)
+  echo -e "${BLUE}Zed:${NC} ${zed_count} servers"
+  jq -r ".context_servers // {} | keys[] | \"  - \(.)\"" "$ZED_CONFIG" 2>/dev/null || true
   echo ""
 
-  echo -e "${BLUE}Claude:${NC} $(jq '(.mcpServers // {}) | length' "$CLAUDE_CONFIG" 2>/dev/null || echo 0) servers"
-  jq -r '(.mcpServers // {}) | keys[] | "  - \(.)"' "$CLAUDE_CONFIG" 2>/dev/null || true
+  local claude_count
+  claude_count=$(jq ".mcpServers // {} | length" "$CLAUDE_CONFIG" 2>/dev/null || echo 0)
+  echo -e "${BLUE}Claude:${NC} ${claude_count} servers"
+  jq -r ".mcpServers // {} | keys[] | \"  - \(.)\"" "$CLAUDE_CONFIG" 2>/dev/null || true
   echo ""
 
-  echo -e "${BLUE}Amp:${NC} $(jq '(.["amp.mcpServers"] // {}) | length' "$AMP_CONFIG" 2>/dev/null || echo 0) servers"
-  jq -r '(.["amp.mcpServers"] // {}) | keys[] | "  - \(.)"' "$AMP_CONFIG" 2>/dev/null || true
+  local amp_count
+  amp_count=$(jq ".\"amp.mcpServers\" // {} | length" "$AMP_CONFIG" 2>/dev/null || echo 0)
+  echo -e "${BLUE}Amp:${NC} ${amp_count} servers"
+  jq -r ".\"amp.mcpServers\" // {} | keys[] | \"  - \(.)\"" "$AMP_CONFIG" 2>/dev/null || true
   echo ""
 
-  echo -e "${BLUE}Kilo-code:${NC} $(jq '(.mcpServers // {}) | length' "$KILO_CONFIG" 2>/dev/null || echo 0) servers"
-  jq -r '(.mcpServers // {}) | keys[] | "  - \(.)"' "$KILO_CONFIG" 2>/dev/null || true
+  local kilo_count
+  kilo_count=$(jq ".mcpServers // {} | length" "$KILO_CONFIG" 2>/dev/null || echo 0)
+  echo -e "${BLUE}Kilo-code:${NC} ${kilo_count} servers"
+  jq -r ".mcpServers // {} | keys[] | \"  - \(.)\"" "$KILO_CONFIG" 2>/dev/null || true
   echo ""
 
-  echo -e "${BLUE}Qwen:${NC} $(jq '(.mcpServers // {}) | length' "$QWEN_CONFIG" 2>/dev/null || echo 0) servers"
-  jq -r '(.mcpServers // {}) | keys[] | "  - \(.)"' "$QWEN_CONFIG" 2>/dev/null || true
+  local qwen_count
+  qwen_count=$(jq ".mcpServers // {} | length" "$QWEN_CONFIG" 2>/dev/null || echo 0)
+  echo -e "${BLUE}Qwen:${NC} ${qwen_count} servers"
+  jq -r ".mcpServers // {} | keys[] | \"  - \(.)\"" "$QWEN_CONFIG" 2>/dev/null || true
   echo ""
 
-  echo -e "${BLUE}OpenCode:${NC} $(jq '(.mcp // {}) | length' "$OPENCODE_CONFIG" 2>/dev/null || echo 0) servers"
-  jq -r '(.mcp // {}) | keys[] | "  - \(.)"' "$OPENCODE_CONFIG" 2>/dev/null || true
+  local opencode_count
+  opencode_count=$(jq ".mcp // {} | length" "$OPENCODE_CONFIG" 2>/dev/null || echo 0)
+  echo -e "${BLUE}OpenCode:${NC} ${opencode_count} servers"
+  jq -r ".mcp // {} | keys[] | \"  - \(.)\"" "$OPENCODE_CONFIG" 2>/dev/null || true
   echo ""
 
-  echo -e "${BLUE}Codebuddy:${NC} $(jq '(.mcpServers // {}) | length' "$CODEBUDDY_CONFIG" 2>/dev/null || echo 0) servers"
-  jq -r '(.mcpServers // {}) | keys[] | "  - \(.)"' "$CODEBUDDY_CONFIG" 2>/dev/null || true
+  local codebuddy_count
+  codebuddy_count=$(jq ".mcpServers // {} | length" "$CODEBUDDY_CONFIG" 2>/dev/null || echo 0)
+  echo -e "${BLUE}Codebuddy:${NC} ${codebuddy_count} servers"
+  jq -r ".mcpServers // {} | keys[] | \"  - \(.)\"" "$CODEBUDDY_CONFIG" 2>/dev/null || true
   echo ""
 
-  echo -e "${BLUE}Antigravity:${NC} $(jq '(.mcpServers // {}) | length' "$ANTIGRAVITY_CONFIG" 2>/dev/null || echo 0) servers"
-  jq -r '(.mcpServers // {}) | keys[] | "  - \(.)"' "$ANTIGRAVITY_CONFIG" 2>/dev/null || true
+  local antigravity_count
+  antigravity_count=$(jq ".mcpServers // {} | length" "$ANTIGRAVITY_CONFIG" 2>/dev/null || echo 0)
+  echo -e "${BLUE}Antigravity:${NC} ${antigravity_count} servers"
+  jq -r ".mcpServers // {} | keys[] | \"  - \(.)\"" "$ANTIGRAVITY_CONFIG" 2>/dev/null || true
   echo ""
 
-  echo -e "${BLUE}Qoder:${NC} $(jq '(.mcpServers // {}) | length' "$QODER_CONFIG" 2>/dev/null || echo 0) servers"
-  jq -r '(.mcpServers // {}) | keys[] | "  - \(.)"' "$QODER_CONFIG" 2>/dev/null || true
+  local qoder_count
+  qoder_count=$(jq ".mcpServers // {} | length" "$QODER_CONFIG" 2>/dev/null || echo 0)
+  echo -e "${BLUE}Qoder:${NC} ${qoder_count} servers"
+  jq -r ".mcpServers // {} | keys[] | \"  - \(.)\"" "$QODER_CONFIG" 2>/dev/null || true
   echo ""
 
-  echo -e "${BLUE}Auggie:${NC} $(jq '(.mcpServers // {}) | length' "$AUGGIE_CONFIG" 2>/dev/null || echo 0) servers"
-  jq -r '(.mcpServers // {}) | keys[] | "  - \(.)"' "$AUGGIE_CONFIG" 2>/dev/null || true
+  local auggie_count
+  auggie_count=$(jq ".mcpServers // {} | length" "$AUGGIE_CONFIG" 2>/dev/null || echo 0)
+  echo -e "${BLUE}Auggie:${NC} ${auggie_count} servers"
+  jq -r ".mcpServers // {} | keys[] | \"  - \(.)\"" "$AUGGIE_CONFIG" 2>/dev/null || true
 }
 
 clear_backups() {
@@ -294,6 +359,7 @@ clear_backups() {
 
 case "$1" in
   sync)
+    generate_rendered_config
     sync_auggie
     sync_qoder
     sync_zed
