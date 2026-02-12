@@ -238,9 +238,28 @@ sync_vibe() {
   if [[ -f "$VIBE_CONFIG" ]]; then
     backup "$VIBE_CONFIG" "vibe"
 
+    # Generate TOML format for Vibe
     {
-      echo "[[mcp_servers]]"
-      jq -r '.[] | "[[mcp_servers]]\nname = \"\(.key)\"\ntransport = \"stdio\"\ncommand = \"\(.value.command)\"\n\(.value.args | if length > 0 then "args = [" + (map("\"\(.)\"") | join(", ")) + "]\n" else "" end)\(.value.env | if type == "object" then "env = { " + (to_entries | map("\(.key) = \"\(.value)\"") | join(", ") + " }\n" else "" end)"' "$MASTER_CONFIG" 2>/dev/null || true
+      echo "# MCP Servers Configuration for Vibe"
+      echo ""
+      jq -r '
+        to_entries[] |
+        "[[mcp_servers]]\n" +
+        "name = \"" + .key + "\"\n" +
+        "transport = \"stdio\"\n" +
+        "command = \"" + .value.command + "\"\n" +
+        (if .value.args and (.value.args | length > 0) then
+          "args = [" + (.value.args | map("\"" + . + "\"") | join(", ")) + "]\n"
+        else
+          ""
+        end) +
+        (if .value.env and (.value.env | length > 0) then
+          "env = { " + (.value.env | to_entries | map(.key + " = \"" + .value + "\"") | join(", ")) + " }\n"
+        else
+          ""
+        end) +
+        "\n"
+      ' "$MASTER_CONFIG" 2>/dev/null || true
     } > "$VIBE_CONFIG.tmp" && mv "$VIBE_CONFIG.tmp" "$VIBE_CONFIG"
 
     log_success "Vibe synced"
