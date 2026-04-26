@@ -489,6 +489,26 @@ add_qoder_trusted_dir() {
   log_info "Qoder uses project-level config for trust"
 }
 
+add_junie_trusted_dir() {
+  log_info "Adding trusted dir to Junie..."
+  local config="${HOME}/.junie/mcp/mcp.json"
+  mkdir -p "$(dirname "$config")"
+  if [[ -f "$config" ]]; then
+    local current
+    current=$(jq -r '.trustedDirectories // [] | join("\n")' "$config" 2>/dev/null || echo "")
+    if ! echo "$current" | grep -q "^${TRUSTED_DIR}$"; then
+      jq --arg dir "$TRUSTED_DIR" 'if .trustedDirectories then .trustedDirectories += [$dir] else .trustedDirectories = [$dir] end' "$config" > "${config}.tmp" && mv "${config}.tmp" "$config"
+      log_success "Junie trusted dir added"
+    else
+      log_info "Junie already has trusted dir"
+    fi
+  else
+    echo '{}' > "$config"
+    jq --arg dir "$TRUSTED_DIR" 'if .trustedDirectories then .trustedDirectories += [$dir] else .trustedDirectories = [$dir] end' "$config" > "${config}.tmp" && mv "${config}.tmp" "$config"
+    log_success "Junie trusted dir added"
+  fi
+}
+
 add_trusted_dirs() {
   log_info "Adding trusted directories to all CLIs..."
   add_zed_trusted_dir
@@ -504,6 +524,7 @@ add_trusted_dirs() {
   add_codebuddy_trusted_dir
   add_auggie_trusted_dir
   add_qoder_trusted_dir
+  add_junie_trusted_dir
   log_success "Trusted directories added to all CLIs"
 }
 

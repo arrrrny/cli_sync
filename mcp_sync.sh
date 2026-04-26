@@ -27,6 +27,7 @@ CODEBUDDY_CONFIG="${HOME}/.codebuddy/.mcp.json"
 ANTIGRAVITY_CONFIG="/Users/arrrrny/.gemini/antigravity/mcp_config.json"
 QODER_CONFIG="${HOME}/.qoder.json"
 AUGGIE_CONFIG="${HOME}/.augment/settings.json"
+JUNIE_CONFIG="${HOME}/.junie/mcp/mcp.json"
 
 KIRO_BIN="/Applications/Kiro CLI.app/Contents/MacOS/kiro-cli"
 
@@ -146,6 +147,21 @@ sync_factory() {
     log_success "Factory-droid synced"
   else
     log_info "Factory-droid config not found"
+  fi
+}
+
+sync_junie() {
+  log_info "Syncing Junie..."
+  mkdir -p "$(dirname "$JUNIE_CONFIG")"
+  if [[ -f "$JUNIE_CONFIG" ]]; then
+    backup "$JUNIE_CONFIG" "junie"
+  fi
+
+  # Write the master config directly to Junie's mcp.json
+  if cp "$MASTER_CONFIG" "$JUNIE_CONFIG" 2>/dev/null; then
+    log_success "Junie synced"
+  else
+    log_error "Failed to write Junie config"
   fi
 }
 
@@ -359,6 +375,12 @@ status() {
   auggie_count=$(jq ".mcpServers // {} | length" "$AUGGIE_CONFIG" 2>/dev/null || echo 0)
   echo -e "${BLUE}Auggie:${NC} ${auggie_count} servers"
   jq -r ".mcpServers // {} | keys[] | \"  - \(.)\"" "$AUGGIE_CONFIG" 2>/dev/null || true
+
+  # Junie
+  local junie_count
+  junie_count=$(jq ". | length" "$JUNIE_CONFIG" 2>/dev/null || echo 0)
+  echo -e "${BLUE}Junie:${NC} ${junie_count} servers"
+  jq -r ". | keys[] | \"  - \(.)\"" "$JUNIE_CONFIG" 2>/dev/null || true
 }
 
 clear_backups() {
@@ -385,6 +407,7 @@ case "$1" in
     sync_amp
     sync_claude
     sync_factory
+    sync_junie
     sync_trae
     sync_qwen
     sync_opencode
@@ -407,6 +430,7 @@ case "$1" in
     backup "$VIBE_CONFIG" vibe
     backup "$QODER_CONFIG" qoder
     backup "$AUGGIE_CONFIG" auggie
+    backup "$JUNIE_CONFIG" junie
     ;;
   clear-backups|clear)
     clear_backups
