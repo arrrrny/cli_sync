@@ -4,3 +4,6 @@ skill_sync_configs
 
 # Stakpak session files
 .stakpak/session*
+backups
+.memsearch
+.env
