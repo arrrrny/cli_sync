@@ -52,26 +52,50 @@ PRIV_SKILLS_SRC="${SCRIPT_DIR}/private_skills"
 BACKUP_DIR="${SCRIPT_DIR}/backups"
 
 # App Definitions (Name | Config Path | Skills Dir | Format)
-# Format types: standard, opencode, zed, amp, vibe
+# Only Claude, OpenCode, and Zed are supported.
 APPS=(
-    "Claude      | ${HOME}/.claude.json                   | ${HOME}/.claude/skills         | standard"
+    "Claude      | ${HOME}/.claude.json                           | ${HOME}/.claude/skills         | standard"
     "OpenCode    | ${HOME}/.config/opencode/opencode.json         | ${HOME}/.config/opencode/skills | opencode"
-    "Zed         | ${HOME}/.config/zed/settings.json              | ${HOME}/.config/zed/skills     | zed"
-    "Trae        | ${HOME}/Library/Application Support/Trae/User/mcp.json | ${HOME}/Library/Application Support/Trae/User/skills | standard"
-    "Amp         | ${HOME}/.config/amp/settings.json              | ${HOME}/.config/amp/skills      | amp"
-    "Junie       | ${HOME}/.junie/mcp/mcp.json                    | ${HOME}/.junie/skills          | standard"
-    "Vibe        | ${HOME}/.vibe/config.toml                      | ${HOME}/.vibe/skills           | vibe"
-    "Qwen        | ${HOME}/.qwen/settings.json                    | ${HOME}/.qwen/skills           | standard"
-    "Antigravity | ${HOME}/.gemini/antigravity/mcp_config.json    | ${HOME}/.gemini/skills         | standard"
+    "Zed         | ${HOME}/.config/zed/settings.json              | ${HOME}/.agents/skills           | zed"
 )
 
 # --- 4. Core Logic ---
 
-backup() {
+# --- Backup Helpers ---
+# Shared timestamp so MCP + skills backups from the same run pair up.
+BACKUP_TS="$(date +%Y%m%d_%H%M%S)"
+
+# Back up a single config file (MCP settings).
+backup_config() {
     local file=$1 name=$2
     if [[ -f "$file" ]]; then
         mkdir -p "$BACKUP_DIR"
-        cp "$file" "${BACKUP_DIR}/${name}_$(date +%Y%m%d_%H%M%S).bak"
+        cp "$file" "${BACKUP_DIR}/${name}_${BACKUP_TS}.bak"
+    fi
+}
+
+# Back up a skills directory into a compressed tarball.
+backup_skills() {
+    local dir=$1 name=$2
+    if [[ -d "$dir" ]] && [[ -n "$(ls -A "$dir" 2>/dev/null)" ]]; then
+        mkdir -p "$BACKUP_DIR"
+        tar -czf "${BACKUP_DIR}/${name}_skills_${BACKUP_TS}.tar.gz" -C "$dir" . 2>/dev/null
+    fi
+}
+
+# Keep only the N most recent backups matching a glob pattern.
+# Files are ordered by modification time (newest first).
+prune_backups() {
+    local pattern=$1 keep=${2:-3}
+    local files=()
+    while IFS= read -r f; do
+        [[ -n "$f" ]] && files+=("$f")
+    done < <(ls -1dt "${BACKUP_DIR}"/${pattern} 2>/dev/null)
+    local total=${#files[@]}
+    if (( total > keep )); then
+        for f in "${files[@]:keep}"; do
+            rm -f "$f"
+        done
     fi
 }
 
@@ -82,10 +106,6 @@ transform_opencode() {
         value: (.value + {enabled: true} |
         if .type == "http" then . + {type: "remote"} else (. + {type: "local"} | if .env then .environment = .env | del(.env) else . end | .command = (if .command | type == "string" then ([.command] + (.args // [])) else .command end) | del(.args)) end)
     }) | from_entries' "$1"
-}
-
-transform_amp() {
-    jq --argjson mcp "$(jq '.' "$1")" '. + {"amp.mcpServers": $mcp | to_entries | map({key: .key, value: (.value + {enabled: true})}) | from_entries}'
 }
 
 # --- 5. Execution ---
@@ -101,7 +121,13 @@ sync_app() {
     fi
 
     log_info "Detected ${name}. Syncing..."
-    backup "$config" "$name"
+
+    # Backup BEFORE modifying anything — both MCP config and skills dir.
+    backup_config "$config" "$name"
+    backup_skills "$skills" "$name"
+    # Retention: keep only the last 3 of each type for this app.
+    prune_backups "${name}_*.bak" 3
+    prune_backups "${name}_skills_*.tar.gz" 3
 
     # 1. Sync MCP if config exists
     if [[ -f "$config" ]]; then
@@ -117,23 +143,22 @@ sync_app() {
                 local clean=$(sed -e 's|//.*$||g' -e 's|/\*.*\*/||g' "$config")
                 jq -s '.[0] * {context_servers: .[1]}' <(echo "$clean") "$RENDERED_MASTER" 2>/dev/null > "$config.tmp" && mv "$config.tmp" "$config"
                 ;;
-            amp)
-                jq --argjson mcp "$(jq '.' "$RENDERED_MASTER")" '. + {"amp.mcpServers": $mcp | to_entries | map({key: .key, value: (.value + {enabled: true})}) | from_entries}' "$config" > "$config.tmp" && mv "$config.tmp" "$config"
-                ;;
-            vibe)
-                # Specialized Vibe TOML output
-                {
-                    echo "# Vibe MCP Config"
-                    jq -r 'to_entries[] | "[[mcp_servers]]\nname = \"" + .key + "\"\ncommand = \"" + .value.command + "\"\nargs = " + (.value.args | tojson) + "\n"' "$RENDERED_MASTER"
-                } > "$config"
-                ;;
         esac
     fi
 
     # 2. Sync Skills if target dir exists (or we want to create it)
+    # NON-DESTRUCTIVE by default: upsert only (copy new/updated, never delete).
+    # Use --force/-f to enable --delete (mirror source exactly, removing extras).
     if [[ -n "$skills" ]]; then
         mkdir -p "$skills"
-        [[ -d "$SKILLS_SRC" ]] && rsync -av --delete "$SKILLS_SRC/" "$skills/" 2>/dev/null || true
+        local delete_flag=""
+        [[ "${FORCE:-0}" == "1" ]] && delete_flag="--delete"
+        if [[ -d "$SKILLS_SRC" ]]; then
+            if [[ -n "$delete_flag" ]]; then
+                log_warn "FORCE mode: ${name} skills dir will be mirrored (extras deleted)."
+            fi
+            rsync -av $delete_flag "$SKILLS_SRC/" "$skills/" 2>/dev/null || true
+        fi
         [[ -d "$PRIV_SKILLS_SRC" ]] && rsync -av "$PRIV_SKILLS_SRC/" "$skills/" 2>/dev/null || true
     fi
 
@@ -141,11 +166,28 @@ sync_app() {
 }
 
 main() {
-    local cmd="${1:-sync}"
+    local FORCE=0
+    local cmd=""
+    local args=()
+
+    # Parse arguments: separate flags from the subcommand
+    for arg in "$@"; do
+        case "$arg" in
+            --force|-f) FORCE=1 ;;
+            *) args+=("$arg") ;;
+        esac
+    done
+    cmd="${args[0]:-sync}"
+    export FORCE
 
     case "$cmd" in
         sync)
             log_info "Scanning for installed AI CLIs..."
+            if [[ "$FORCE" == "1" ]]; then
+                log_warn "FORCE mode enabled: skill dirs will be mirrored (extras deleted)."
+            else
+                log_info "Safe mode: upsert only (no deletions). Use --force to mirror."
+            fi
             mkdir -p "$(dirname "$RENDERED_MASTER")"
             substitute_env < "$RAW_MASTER" > "$RENDERED_MASTER"
 
@@ -182,7 +224,14 @@ main() {
             log_success "Backups cleared."
             ;;
         *)
-            echo "Usage: $0 [sync|status|trust|clear]"
+            echo "Usage: $0 [sync [--force|-f]|status|trust|clear]"
+            echo ""
+            echo "Commands:"
+            echo "  sync         Sync MCP + skills (default: upsert, no deletions)"
+            echo "  sync --force Sync skills with --delete (mirror source exactly)"
+            echo "  status       Show installed CLIs"
+            echo "  trust        Add cwd to trusted dirs (Claude/OpenCode)"
+            echo "  clear        Clear backups"
             exit 1
             ;;
     esac

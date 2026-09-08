@@ -2,6 +2,9 @@ mcp_sync_configs
 private_skills
 skill_sync_configs
 
+# Generated artifact (regenerated each run)
+mcp_sync_configs/master_mcp_servers.json.rendered
+
 # Stakpak session files
 .stakpak/session*
 backups
